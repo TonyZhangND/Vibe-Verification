@@ -18,5 +18,10 @@
 
 ## Ex 4
 
-* "Complete the definition for `predicate IsSorted`.
-  * 
+* "Complete the definition for `predicate IsSorted`."
+  * Did great
+* "Complete the definition for `predicate SortSpec`."
+  * Did great. It strengthened the spec with `|output| == |input|
+  && multiset(output) == multiset(input)`.
+* "Implement a `method MergeSort(input: seq<int>)`, that satisfies the appropriate post-conditions."
+  * Wrote method `MergeSort`, helper method `Merge` and helper lemma `MultisetSliceConcat` perfectly.
