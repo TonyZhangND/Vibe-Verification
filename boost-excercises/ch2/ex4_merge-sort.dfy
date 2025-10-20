@@ -111,5 +111,3 @@ method MergeSort(input: seq<int>) returns (output: seq<int>)
   
   MultisetSliceConcat(input, mid);
 }
-
-
