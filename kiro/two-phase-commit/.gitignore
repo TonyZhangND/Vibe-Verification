@@ -1,1 +1,3 @@
 .vscode/
+.kiro/specs/two-phase-commit/states
+.kiro/specs/two-phase-commit/tla2tools.jar

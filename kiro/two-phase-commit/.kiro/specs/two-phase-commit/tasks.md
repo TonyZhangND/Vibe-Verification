@@ -1,19 +1,19 @@
 # Implementation Plan
 
-- [ ] 1. Create TLA+ specification for model checking
-  - [ ] 1.1 Implement TLA+ specification of 2PC algorithm
+- [x] 1. Create TLA+ specification for model checking
+  - [x] 1.1 Implement TLA+ specification of 2PC algorithm
     - Create TLA+ module defining the two-phase commit protocol
     - Model coordinator and participant state machines
     - Define message passing and protocol transitions
     - _Requirements: 3.1, 3.2, 6.1, 6.2_
   
-  - [ ] 1.2 Add safety and liveness properties
+  - [x] 1.2 Add safety and liveness properties
     - Define safety properties for correctness guarantees (commit/abort consistency)
     - Add liveness properties for protocol termination
     - Create invariants for state consistency across participants
     - _Requirements: 6.1, 6.2, 6.3, 6.4_
   
-  - [ ] 1.3 Configure TLC model checker setup
+  - [x] 1.3 Configure TLC model checker setup
     - Create TLA+ configuration file for model checking
     - Define state space constraints and model parameters
     - Add example model checking scenarios with different participant counts
