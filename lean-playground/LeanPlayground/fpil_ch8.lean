@@ -40,3 +40,36 @@ def Tail.lengthHelper (acc: Nat) (xs : List α) : Nat :=
 
 def Tail.length (xs : List α) : Nat :=
   Tail.lengthHelper 0 xs
+
+def NonTail.factorial : Nat → Nat
+  | 0 => 1
+  | n + 1 => factorial n * (n + 1)
+
+def Tail.factorialHelper (acc: Nat) (x : Nat) : Nat :=
+  match x with
+  | 0 => acc
+  | n + 1 => factorialHelper (acc * (n + 1)) n
+
+def Tail.factorial (n : Nat) : Nat :=
+  Tail.factorialHelper 1 n
+
+def NonTail.filter (p : α → Bool) : List α → List α
+  | [] => []
+  | x :: xs =>
+    if p x then
+      x :: filter p xs
+    else
+      filter p xs
+
+def Tail.filterHelper (acc : List α) (p : α → Bool) (xs : List α)
+: List α :=
+  match xs with
+  | [] => acc
+  | x :: xs =>
+    if p x then
+      filterHelper (x :: acc) p xs
+    else
+      filterHelper acc p xs
+
+def Tail.filter (p : α → Bool) (xs : List α) :=
+  Tail.reverse (Tail.filterHelper [] p xs)
