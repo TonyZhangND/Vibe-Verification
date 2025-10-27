@@ -176,3 +176,38 @@ theorem non_tail_factorial_eq_tail_factorial :
   simp [Tail.factorial]
   rw [← helper_factorial_accum]
   simp
+
+
+/- Ch 8.3 Arrays and Termination -/
+
+inductive IsThree : Nat → Prop where
+  | isThree : IsThree 3
+
+theorem three_is_three : IsThree 3 := by
+  constructor
+
+theorem four_is_not_three : ¬ IsThree 4 := by
+  intro h        -- Assume we have h : IsThree 4
+  cases h        -- Case analysis - but IsThree only has constructor for 3!
+
+inductive IsFive : Nat → Prop where
+  | isFive : IsFive 5
+
+theorem three_plus_two_five : IsThree n → IsFive (n + 2) := by
+  intro three
+  cases three with
+  | isThree =>
+    constructor
+
+theorem four_le_seven : 4 ≤ 7 :=
+  open Nat.le in
+  step (step (step refl))
+
+
+
+def arrayMapHelper (f : α → β) (arr : Array α)
+    (soFar : Array β) (i : Nat) : Array β :=
+  if inBounds : i < arr.size then
+    arrayMapHelper f arr (soFar.push (f arr[i])) (i + 1)
+  else soFar
+  termination_by arr.size - i
