@@ -291,6 +291,13 @@ def mergeSort [Ord α] (lst : List α) : List α :=
 #eval mergeSort ["soapstone", "geode", "mica", "limestone"]
 #eval mergeSort [5, 3, 22, 15]
 
+
+
+def div (n k : Nat) (ok : k ≠ 0) : Nat :=
+  if n < k then 0
+  else 1 + div (n - k) k ok
+  termination_by n
+
 /- Ch 8.4 Exercises -/
 
 -- ∀ n : 0 < n + 1
@@ -313,3 +320,33 @@ theorem k_not_zero : (n k: Nat) → k < n → n ≠ 0 := by
   intro n k h_lt h_eq
   rw [h_eq] at h_lt   -- Substitute n = 0, get k < 0
   simp at h_lt        -- k < 0 is impossible (contradiction)
+
+
+theorem subtraction (a b c: Nat) : c ≤ a → a = b + c → a - c = b := by
+  intro h_le h_eq
+  rw [h_eq]
+  rw [Nat.add_sub_cancel]
+
+
+theorem redistribute_subtraction :
+  (x y z: Nat) → y ≤ x → x - y = z → x = z + y := by
+  intro x y z hle h
+  rw [← h]                 -- replace z with x - y
+  exact (Nat.sub_add_cancel hle).symm
+
+
+-- For all natural numbers n: n - n = 0
+theorem nat_zero : (n : Nat) → n - n = 0 := by
+  intro n
+  have h : n = n := by
+    simp
+  have h2 : n ≤ n := by
+    simp
+  apply subtraction n 0 n h2 (_ : n = 0 + n)
+  simp
+
+-- For all natural numbers n, k: n + 1 < k implies n < k
+theorem succ_lt_implies_lt (n k : Nat) : n + 1 < k → n < k := by
+  intro succ_lt
+  -- We know n < n + 1 and n + 1 < k, so by transitivity: n < k
+  exact Nat.lt_trans (Nat.lt_succ_self n) succ_lt
