@@ -211,3 +211,105 @@ def arrayMapHelper (f : α → β) (arr : Array α)
     arrayMapHelper f arr (soFar.push (f arr[i])) (i + 1)
   else soFar
   termination_by arr.size - i
+
+
+/- Ch 8.4 MergeSort -/
+
+-- Version with explicit termination proof (using ys instead of y'::ys')
+def merge_with_proof [Ord α] (xs ys : List α) : List α :=
+  match hxs : xs, hys: ys with
+  | [], _ => ys
+  | _, [] => xs
+  | x'::xs', y'::ys' =>
+    match Ord.compare x' y' with
+    | .lt | .eq => x' :: merge_with_proof xs' ys
+    | .gt => y' :: merge_with_proof xs ys'
+  termination_by xs.length + ys.length
+
+-- Simpler version where Lean figures it out automatically
+def merge [Ord α] (xs ys : List α) : List α :=
+  match xs, ys with
+  | [], _ => ys
+  | _, [] => xs
+  | x'::xs', y'::ys' =>
+    match Ord.compare x' y' with
+    | .lt | .eq => x' :: merge xs' (y'::ys')
+    | .gt => y' :: merge (x'::xs') ys'
+
+
+def splitList (lst : List α) : (List α × List α) :=
+  match lst with
+  | [] => ([], [])
+  | x :: xs =>
+    let (a, b) := splitList xs
+    (x :: b, a)
+
+theorem splitList_shorter_le (lst : List α) :
+    (splitList lst).fst.length ≤ lst.length ∧
+      (splitList lst).snd.length ≤ lst.length := by
+  induction lst with
+  | nil => simp [splitList]
+  | cons x xs ih =>
+    simp [splitList]
+    cases ih
+    constructor
+    case left => assumption
+    case right => omega
+
+
+theorem splitList_shorter (lst : List α) (_ : lst.length ≥ 2) :
+    (splitList lst).fst.length < lst.length ∧
+      (splitList lst).snd.length < lst.length := by
+  match lst with
+  | x :: y :: xs =>
+    simp +arith[splitList]
+    apply splitList_shorter_le
+
+theorem splitList_shorter_fst (lst : List α) (h : lst.length ≥ 2) :
+    (splitList lst).fst.length < lst.length :=
+  splitList_shorter lst h |>.left
+
+theorem splitList_shorter_snd (lst : List α) (h : lst.length ≥ 2) :
+    (splitList lst).snd.length < lst.length :=
+  splitList_shorter lst h |>.right
+
+
+def mergeSort [Ord α] (lst : List α) : List α :=
+  match h : lst with
+  | [] => []
+  | [x] => [x]
+  | x :: y :: xs =>
+    -- lst = x :: y :: xs, so lst.length ≥ 2 immediately
+    have : lst.length ≥ 2 := by
+      rw [h]; simp [List.length]
+    let split := splitList lst
+    have h1 : split.fst.length < lst.length := splitList_shorter_fst lst ‹lst.length ≥ 2›
+    have h2 : split.snd.length < lst.length := splitList_shorter_snd lst ‹lst.length ≥ 2›
+    merge (mergeSort split.fst) (mergeSort split.snd)
+  termination_by lst.length
+
+#eval mergeSort ["soapstone", "geode", "mica", "limestone"]
+#eval mergeSort [5, 3, 22, 15]
+
+/- Ch 8.4 Exercises -/
+
+-- ∀ n : 0 < n + 1
+theorem zero_lt_n_plus_one : (n : Nat) → 0 < n + 1 := by
+  intro n
+  simp
+
+-- ∀ n : 0 ≤ n
+theorem zero_le_n : (n : Nat) → 0 ≤ n := by
+  intro n
+  simp
+
+-- For all natural numbers n, k : (n + 1) - (k + 1) = n - k
+theorem cancellation : (n k: Nat) → (n + 1) - (k + 1) = n - k := by
+  intro n
+  simp
+
+-- For all natural numbers n, k: if k < n, then n ≠ 0
+theorem k_not_zero : (n k: Nat) → k < n → n ≠ 0 := by
+  intro n k h_lt h_eq
+  rw [h_eq] at h_lt   -- Substitute n = 0, get k < 0
+  simp at h_lt        -- k < 0 is impossible (contradiction)
