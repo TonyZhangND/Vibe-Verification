@@ -39,17 +39,37 @@ datatype MonotonicVBOption = MVBSome(value: ValBal) | MVBNone
   }
 }
 
-datatype MonotonicReceivedAcceptsMap = RA(m: map<ValBal, set<AcceptorId>>) 
+datatype MonotonicValueAccepts = MVA(m: map<Value, map<LeaderId, set<AcceptorId>>>)
 {
-  ghost predicate SatisfiesMonotonic(past: MonotonicReceivedAcceptsMap) {
-    forall vb | 
-    && vb in past.m 
-    :: 
-      && 0 < |past.m[vb]|
-      && vb in this.m
-      && past.m[vb] <= this.m[vb]
-      && |past.m[vb]| <= |this.m[vb]|
+  ghost predicate SatisfiesMonotonic(past: MonotonicValueAccepts) {
+    forall val |
+      val in past.m
+    ::
+      && val in this.m
+      && forall bal |
+        bal in past.m[val]
+      ::
+        && bal in this.m[val]
+        && past.m[val][bal] <= this.m[val][bal]
+        && |past.m[val][bal]| <= |this.m[val][bal]|
   }
+
+  ghost function AcceptorsForValue(val: Value) : map<LeaderId, set<AcceptorId>> {
+    if val in m then m[val] else map[]
+  }
+
+  ghost function AcceptorsForValueAtBallot(val: Value, bal: LeaderId) : set<AcceptorId> {
+    var perVal := AcceptorsForValue(val);
+    if bal in perVal then perVal[bal] else {}
+  }
+
+  ghost function BallotsForValue(val: Value) : set<LeaderId> {
+    if val in m then set bal | bal in m[val] :: bal else {}
+  }
+}
+
+ghost function SingletonBallotAcceptors(bal: LeaderId, acc: AcceptorId) : map<LeaderId, set<AcceptorId>> {
+  map b: LeaderId | b == bal :: {acc}
 }
 
 datatype MonotonicPromisesAndValue = PV(promises: set<AcceptorId>, value: Value, f: nat) 

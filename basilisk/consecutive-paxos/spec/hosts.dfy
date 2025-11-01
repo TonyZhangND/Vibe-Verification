@@ -355,8 +355,8 @@ module LearnerHost {
   }
 
   datatype Variables = Variables(
-    // maps ValBal to acceptors that accepted such pair
-    receivedAccepts: MonotonicReceivedAcceptsMap,
+    // maps Value to ballots and acceptors that accepted the value
+    receivedAccepts: MonotonicValueAccepts,
     learned: Option<Value>
   ) {
     
@@ -384,7 +384,7 @@ module LearnerHost {
   }
 
   ghost predicate Init(c: Constants, v: Variables) {
-    && v.receivedAccepts == RA(map[])
+    && v.receivedAccepts == MVA(map[])
     && v.learned == None
   }
 
@@ -399,16 +399,51 @@ module LearnerHost {
       case StutterStep => NextStutterStep3(c, v, v', msgOps)
   }
 
-  function UpdateReceivedAccepts(receivedAccepts: MonotonicReceivedAcceptsMap, 
-    vb: ValBal, acc: AcceptorId) : (out: MonotonicReceivedAcceptsMap)
-    ensures vb in receivedAccepts.m ==> vb in out.m
-    ensures vb in receivedAccepts.m ==> |receivedAccepts.m[vb]| <= |out.m[vb]|
+  ghost function UpdateReceivedAccepts(receivedAccepts: MonotonicValueAccepts, 
+    vb: ValBal, acc: AcceptorId) : (out: MonotonicValueAccepts)
+    ensures receivedAccepts.AcceptorsForValueAtBallot(vb.v, vb.b) <= out.AcceptorsForValueAtBallot(vb.v, vb.b)
+    ensures acc in out.AcceptorsForValueAtBallot(vb.v, vb.b)
+    ensures forall bal |
+      bal in receivedAccepts.AcceptorsForValue(vb.v) && bal != vb.b
+    ::
+      out.AcceptorsForValueAtBallot(vb.v, bal) == receivedAccepts.AcceptorsForValueAtBallot(vb.v, bal)
   {
-    if vb in receivedAccepts.m then 
-      UnionIncreasesCardinality(receivedAccepts.m[vb], {acc});
-      RA(receivedAccepts.m[vb := receivedAccepts.m[vb] + {acc}])
-    else 
-      RA(receivedAccepts.m[vb := {acc}])
+    if vb.v in receivedAccepts.m then
+      MVA(receivedAccepts.m[vb.v :=
+        (if vb.b in receivedAccepts.m[vb.v]
+         then receivedAccepts.m[vb.v][vb.b := receivedAccepts.m[vb.v][vb.b] + {acc}]
+         else receivedAccepts.m[vb.v][vb.b := {acc}]
+        )])
+    else
+      MVA(receivedAccepts.m[vb.v := SingletonBallotAcceptors(vb.b, acc)])
+  }
+
+  ghost function AcceptorsOverRange(receivedAccepts: MonotonicValueAccepts, val: Value, lo: LeaderId, hi: LeaderId) : set<AcceptorId>
+    requires lo <= hi
+    decreases hi - lo
+  {
+    if lo == hi then
+      receivedAccepts.AcceptorsForValueAtBallot(val, lo)
+    else
+      receivedAccepts.AcceptorsForValueAtBallot(val, lo) + AcceptorsOverRange(receivedAccepts, val, lo + 1, hi)
+  }
+
+  ghost predicate ConsecutiveRangeCovered(receivedAccepts: MonotonicValueAccepts, val: Value, lo: LeaderId, hi: LeaderId)
+    requires lo <= hi
+  {
+    forall bal |
+      lo <= bal && bal <= hi
+    ::
+      0 < |receivedAccepts.AcceptorsForValueAtBallot(val, bal)|
+  }
+
+  ghost predicate HasConsecutiveMajorityForBallot(c: Constants, vars: Variables, vb: ValBal)
+  {
+    exists lo: LeaderId, hi: LeaderId ::
+      && lo <= vb.b
+      && vb.b <= hi
+      && ConsecutiveRangeCovered(vars.receivedAccepts, vb.v, lo, hi)
+      && |AcceptorsOverRange(vars.receivedAccepts, vb.v, lo, hi)| >= c.f + 1
   }
 
   ghost predicate NextReceiveAcceptStep(c: Constants, v: Variables, v': Variables, msgOps: MessageOps) {
@@ -428,8 +463,8 @@ module LearnerHost {
   ghost predicate NextLearnStep(c: Constants, v: Variables, v': Variables, vb: ValBal, msgOps: MessageOps) {
     && msgOps.recv.None?
     && msgOps.send.None?
-    && vb in v.receivedAccepts.m              // enabling
-    && |v.receivedAccepts.m[vb]| >= c.f + 1   // enabling
+    && 0 < |v.receivedAccepts.AcceptorsForValueAtBallot(vb.v, vb.b)|
+    && HasConsecutiveMajorityForBallot(c, v, vb)
     && v.learned.None?
     && v' == v.(learned := Some(vb.v))        // learn new value
   }
