@@ -1,5 +1,5 @@
-include "monotonicityInvariantsAutogen.dfy"
-include "messageInvariantsAutogen.dfy"
+include "monotonicityInvariants.dfy"
+include "messageInvariants.dfy"
 
 module PaxosProof {
   

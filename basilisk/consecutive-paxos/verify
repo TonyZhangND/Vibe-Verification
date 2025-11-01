@@ -6,7 +6,7 @@ dafny="$scriptpath/../local-dafny/Scripts/dafny"
 
 dafnyVerify="$dafny /timeLimit:20 /compile:0  /noNLarith /autoTriggers:1 /vcsCores:10"
 
-files="$scriptpath/../lib/* $scriptpath/spec/hosts.dfy $scriptpath/spec/distributedSystem.dfy $scriptpath/spec/spec.dfy $scriptpath/proof/messageInvariantsAutogen.dfy $scriptpath/proof/monotonicityInvariantsAutogen.dfy $scriptpath/proof/applicationProof.dfy"
+files="$scriptpath/../lib/* $scriptpath/spec/hosts.dfy $scriptpath/spec/distributedSystem.dfy $scriptpath/spec/spec.dfy $scriptpath/proof/messageInvariants.dfy $scriptpath/proof/monotonicityInvariants.dfy $scriptpath/proof/applicationProof.dfy"
 
 echo "Verifying $files" | tr " " "\n"
 time $dafnyVerify $files
