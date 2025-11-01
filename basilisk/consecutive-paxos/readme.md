@@ -5,3 +5,5 @@ Hosts can receive and send messages in the same step.
 
 
 Begin with pure Paxos. Then ask LLM to write consecutive Paxos, and prove it correct.
+
+* Agent was able to come up with correct consecutive Paxos protocol spec.
