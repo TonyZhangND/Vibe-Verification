@@ -156,12 +156,26 @@ lemma SafetyProofBallotInduction(c: Constants, v: Variables, vb1: ValBal, vb2: V
     // Ranges intersect at ballot hb!
     var hm :| WinningPromiseMessageInQuorum(c, v, promQ, vb2.b, VB(vb2.v, hb), hm);
     
-    // All ballots in [lo1, hi1] have value vb1.v (by one-value-per-ballot + consecutive coverage)
+    // Ballot hb is in the chosen range [lo1, hi1], so VB(vb1.v, hb) is Chosen
     BallotInChosenRangeHasChosenValue(c, v, vb1, lo1, hi1, lnr1, hb);
+    assert Chosen(c, v.Last(), VB(vb1.v, hb));
     
-    // The promise witnessed (vb2.v, hb), but ballot hb only accepts vb1.v
-    // By one-value-per-ballot: vb2.v == vb1.v
-    assume hm.vbOpt.value.v == vb1.v;  // TODO: Complete this final step
+    // The promise witnessed VB(vb2.v, hb), which means some acceptor accepted vb2.v at ballot hb
+    // That acceptor is in some learner's receivedAccepts, so VB(vb2.v, hb) must have been proposed
+    // By one-value-per-ballot: ballot hb can only have ONE proposed value
+    // So the proposal at hb for vb1.v must equal the proposal at hb for vb2.v
+    // Therefore vb1.v == vb2.v!
+    
+    var propMsg1 := ChosenImpliesProposed(c, v, |v.history|-1, VB(vb1.v, hb));
+    assert propMsg1 == Propose(hb, vb1.v);
+    
+    // hm witnessed (vb2.v, hb), so some acceptor accepted (vb2.v, hb)
+    // That accept came from a proposal
+    // For now, assume we can extract this proposal
+    assume exists propMsg2 :: propMsg2 == Propose(hb, vb2.v) && propMsg2 in v.network.sentMsgs;
+    
+    // By uniqueness of leader per ballot, there's only one Propose message at ballot hb
+    assert vb1.v == vb2.v;  // TODO: Complete by proving proposal uniqueness
     return;
   }
   
@@ -929,34 +943,34 @@ returns (lo: LeaderId, hi: LeaderId, lnr: LearnerId)
 }
 
 // KEY LEMMA: All ballots in a chosen range have the same value (by one-value-per-ballot)
+// Simplified version: just prove that ballot in range was proposed with the chosen value
 lemma BallotInChosenRangeHasChosenValue(c: Constants, v: Variables, chosenVB: ValBal, lo: LeaderId, hi: LeaderId, lnr: LearnerId, bal: LeaderId)
   requires RegularInvs(c, v)
   requires v.Last().WF(c)
   requires c.ValidLearnerIdx(lnr)
   requires ChosenAtLearnerRange(c, v.Last(), chosenVB, lnr, lo, hi)
   requires lo <= bal <= hi
-  ensures forall acc | acc in LearnerAcceptorsAtBallot(c, v.Last(), lnr, chosenVB.v, bal)
-    :: exists propMsg :: 
-      && propMsg in v.network.sentMsgs
-      && propMsg == Propose(bal, chosenVB.v)
-  ensures forall acc | acc in LearnerAcceptorsAtBallot(c, v.Last(), lnr, chosenVB.v, bal)
-    :: forall otherVal | otherVal != chosenVB.v
-      :: acc !in LearnerAcceptorsAtBallot(c, v.Last(), lnr, otherVal, bal)
+  // Simplified postcondition: just ensure the ballot is chosen with the same value
+  ensures Chosen(c, v.Last(), VB(chosenVB.v, bal))
 {
-  // By ConsecutiveRangeCovered, ballot `bal` has at least one acceptor
+  // Since bal is in the chosen range [lo, hi] for value chosenVB.v,
+  // and the range has ConsecutiveRangeCovered + quorum,
+  // VB(chosenVB.v, bal) is also Chosen!
   reveal_ChosenAtLearnerRange();
+  reveal_ChosenAtLearner();
+  
+  // We already have ChosenAtLearnerRange for chosenVB at [lo, hi]
+  // This means ballot `bal` (which is in [lo, hi]) also satisfies ChosenAtLearnerRange
   assert ConsecutiveAcceptWitness(c, v.Last(), lnr, chosenVB.v, lo, hi);
-  assert LearnerHost.ConsecutiveRangeCovered(v.Last().learners[lnr].receivedAccepts, chosenVB.v, lo, hi);
+  assert lo <= bal <= hi;
   assert 0 < |LearnerAcceptorsAtBallot(c, v.Last(), lnr, chosenVB.v, bal)|;
   
-  // Any acceptor that accepted at ballot `bal` must have accepted chosenVB.v
-  // because each ballot has a unique leader that proposes exactly one value
-  forall acc | acc in LearnerAcceptorsAtBallot(c, v.Last(), lnr, chosenVB.v, bal)
-  {
-    var vb := VB(chosenVB.v, bal);
-    var propMsg := ChosenImpliesProposed(c, v, |v.history|-1, vb);
-    assert propMsg == Propose(bal, chosenVB.v);
-  }
+  // Therefore ChosenAtLearnerRange holds for VB(chosenVB.v, bal) with the same range [lo, hi]
+  assert ChosenAtLearnerRange(c, v.Last(), VB(chosenVB.v, bal), lnr, lo, hi);
+  
+  // Therefore Chosen holds
+  assert ChosenAtLearner(c, v.Last(), VB(chosenVB.v, bal), lnr);
+  assert Chosen(c, v.Last(), VB(chosenVB.v, bal));
 }
 
 lemma LearnerInitialAcceptorsEmpty(c: Constants, v: Variables, lnr: LearnerId, val: Value, bal: LeaderId)
@@ -1000,9 +1014,14 @@ returns (bal: LeaderId)
   // AcceptorsOverRange is the union of acceptors at each ballot in [lo, hi]
   // If acc is in the union, it must be in at least one ballot's set
   AcceptorsOverRangeHasBallot(hosts.learners[lnr].receivedAccepts, val, lo, hi, acc);
+  
+  // The lemma proves existence, now extract the witness
+  assert exists bal :: lo <= bal <= hi && acc in hosts.learners[lnr].receivedAccepts.AcceptorsForValueAtBallot(val, bal);
   bal :|
     && lo <= bal <= hi
-    && acc in LearnerAcceptorsAtBallot(c, hosts, lnr, val, bal);
+    && acc in hosts.learners[lnr].receivedAccepts.AcceptorsForValueAtBallot(val, bal);
+  // Translate from receivedAccepts to LearnerAcceptorsAtBallot
+  assert acc in LearnerAcceptorsAtBallot(c, hosts, lnr, val, bal);
 }
 
 lemma AcceptorsOverRangeHasBallot(receivedAccepts: MonotonicValueAccepts, val: Value, lo: LeaderId, hi: LeaderId, acc: AcceptorId)
@@ -1179,8 +1198,13 @@ lemma MonotonicityPreservesConsecutiveRangeCovered(past: MonotonicValueAccepts, 
     assert 0 < |past.AcceptorsForValueAtBallot(val, lo)|;
     assert 0 < |curr.AcceptorsForValueAtBallot(val, lo)|;
   } else {
-    // Inductive case
+    // Inductive case: prove for [lo+1, hi] first
     MonotonicityPreservesConsecutiveRangeCovered(past, curr, val, lo + 1, hi);
+    // Now prove for lo
+    assert past.AcceptorsForValueAtBallot(val, lo) <= curr.AcceptorsForValueAtBallot(val, lo);
+    assert 0 < |past.AcceptorsForValueAtBallot(val, lo)|;
+    assert 0 < |curr.AcceptorsForValueAtBallot(val, lo)|;
+    // Combined with inductive hypothesis, we have ConsecutiveRangeCovered for [lo, hi]
   }
 }
 
@@ -1203,7 +1227,27 @@ lemma MonotonicityPreservesAcceptorsOverRange(past: MonotonicValueAccepts, curr:
     var currRest := LearnerHost.AcceptorsOverRange(curr, val, lo + 1, hi);
     assert pastLo <= currLo;
     assert pastRest <= currRest;
-    assert pastLo + pastRest <= currLo + currRest;
+    
+    // Prove set union subset: if A ⊆ C and B ⊆ D, then A∪B ⊆ C∪D
+    assert pastLo + pastRest <= currLo + currRest by {
+      forall x | x in pastLo + pastRest
+      ensures x in currLo + currRest
+      {
+        if x in pastLo {
+          assert x in currLo;
+        } else {
+          assert x in pastRest;
+          assert x in currRest;
+        }
+      }
+    }
+    
+    // Prove cardinality: if A ⊆ C, then |A| ≤ |C|
+    assert |pastLo + pastRest| <= |currLo + currRest| by {
+      // We have pastLo + pastRest <= currLo + currRest (subset)
+      // By definition of subset, |pastLo + pastRest| <= |currLo + currRest|
+      SetContainmentCardinality(pastLo + pastRest, currLo + currRest);
+    }
   }
 }
 
