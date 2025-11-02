@@ -7,6 +7,62 @@ import opened Types
 import opened UtilitiesLibrary
 import opened MonotonicityLibrary
 import opened DistributedSystem
+import LearnerHost
+
+lemma MonotonicValueAcceptsReflexive(curr: MonotonicValueAccepts)
+  ensures curr.SatisfiesMonotonic(curr)
+{
+  forall val | val in curr.m
+  {
+    forall bal | bal in curr.m[val]
+    {
+      assert curr.m[val][bal] <= curr.m[val][bal];
+      assert |curr.m[val][bal]| <= |curr.m[val][bal]|;
+    }
+  }
+}
+
+lemma MonotonicValueAcceptsTransitive(a: MonotonicValueAccepts, b: MonotonicValueAccepts, c: MonotonicValueAccepts)
+  requires b.SatisfiesMonotonic(a)
+  requires c.SatisfiesMonotonic(b)
+  ensures c.SatisfiesMonotonic(a)
+{
+  forall val | val in a.m
+  {
+    assert val in b.m;
+    assert val in c.m;
+    forall bal | bal in a.m[val]
+    {
+      assert bal in b.m[val];
+      assert bal in c.m[val];
+      var s1 := a.m[val][bal];
+      var s2 := b.m[val][bal];
+      var s3 := c.m[val][bal];
+      assert s1 <= s2 by {
+        forall x | x in s1
+        {
+          assert x in s2;
+        }
+      }
+      assert s2 <= s3 by {
+        forall x | x in s2
+        {
+          assert x in s3;
+        }
+      }
+      assert s1 <= s3 by {
+        forall x | x in s1
+        {
+          assert x in s2;
+          assert x in s3;
+        }
+      }
+      assert |s1| <= |s2|;
+      assert |s2| <= |s3|;
+      assert |s1| <= |s3|;
+    }
+  }
+}
 
 ghost predicate LeaderHostReceivedPromisesAndValueMonotonic(c: Constants, v: Variables)
   requires v.WF(c)

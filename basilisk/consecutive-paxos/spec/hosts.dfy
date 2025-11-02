@@ -407,6 +407,11 @@ module LearnerHost {
       bal in receivedAccepts.AcceptorsForValue(vb.v) && bal != vb.b
     ::
       out.AcceptorsForValueAtBallot(vb.v, bal) == receivedAccepts.AcceptorsForValueAtBallot(vb.v, bal)
+    ensures forall val |
+      val in receivedAccepts.m && val != vb.v
+    ::
+      out.AcceptorsForValue(val) == receivedAccepts.AcceptorsForValue(val)
+    ensures out.SatisfiesMonotonic(receivedAccepts)
   {
     if vb.v in receivedAccepts.m then
       MVA(receivedAccepts.m[vb.v :=

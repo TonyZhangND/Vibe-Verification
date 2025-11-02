@@ -753,9 +753,8 @@ ghost predicate ReceiveAcceptWitnessCondition(c: Constants, v: Variables, i: nat
   requires v.ValidHistoryIdx(i)
   requires 0 <= idx < |c.learners|
 {
-  && a1 in v.History(i).learners[idx].receivedAccepts.m
-  && a2 in v.History(i).learners[idx].receivedAccepts.m[a1]
-  && (v.History(i).learners[idx].receivedAccepts.m != v.History(0).learners[idx].receivedAccepts.m)
+  && a2 in v.History(i).learners[idx].receivedAccepts.AcceptorsForValueAtBallot(a1.v, a1.b)
+  && v.History(0).learners[idx].receivedAccepts.AcceptorsForValueAtBallot(a1.v, a1.b) != v.History(i).learners[idx].receivedAccepts.AcceptorsForValueAtBallot(a1.v, a1.b)
 }
 
 lemma ReceiveAcceptStepSkolemization(c: Constants, v: Variables, i: nat, idx: int, a1: ValBal, a2: AcceptorId)

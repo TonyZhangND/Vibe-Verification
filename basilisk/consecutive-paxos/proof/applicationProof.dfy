@@ -10,6 +10,7 @@ import opened DistributedSystem
 import opened MonotonicityInvariants
 import opened MessageInvariants
 import opened Obligations
+import LearnerHost
 
 ghost predicate RegularInvs(c: Constants, v: Variables) {
   && MessageInv(c, v)
@@ -101,9 +102,17 @@ lemma ChosenImpliesValidBallot(c: Constants, v: Variables, i: nat, vb: ValBal)
   ensures c.ValidLeaderIdx(vb.b)
 {
   reveal_ChosenAtLearner();
-  var lnr: nat :| ChosenAtLearner(c, v.History(i), vb, lnr);
-  var acc :| acc in v.History(i).learners[lnr].receivedAccepts.m[vb];
+  assert v.WF(c);
+  assert v.History(i).WF(c);
+  var lnr := ChosenLearnerWitness(c, v.History(i), vb);
+  var lo, hi := ChosenAtLearnerRangeWitness(c, v.History(i), vb, lnr);
+  reveal_ChosenAtLearnerRange();
+  assert 0 < |LearnerAcceptorsAtBallot(c, v.History(i), lnr, vb.v, vb.b)|;
+  var acc :| acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, vb.v, vb.b);
   reveal_ValidHistory();
+  ReceiveAcceptWitnessFromMembership(c, v, i, lnr, vb, acc);
+  assert MessageInv(c, v);
+  reveal_LearnerHostReceiveValidity();
   var j, accMsg := ReceiveAcceptStepSkolemization(c, v, i, lnr, vb, acc);
   var k, propMsg := SendAcceptSkolemization(c, v, accMsg);
 }
@@ -189,8 +198,11 @@ returns (promMsg: Message)
 
   // Get Accept quorum
   reveal_ChosenAtLearner();
-  var lnr: nat :| ChosenAtLearner(c, v.Last(), chosenVB, lnr);
-  var accQ := ExtractAcceptMessagesFromReceivedAccepts(c, v, v.Last().learners[lnr].receivedAccepts.m[chosenVB], chosenVB, lnr);
+  assert v.Last().WF(c);
+  var lnr := ChosenLearnerWitness(c, v.Last(), chosenVB);
+  var lo, hi := ChosenAtLearnerRangeWitness(c, v.Last(), chosenVB, lnr);
+  reveal_ChosenAtLearnerRange();
+  var accQ := ExtractAcceptMessagesFromReceivedAccepts(c, v, LearnerAcceptorsAtBallot(c, v.Last(), lnr, chosenVB.v, chosenVB.b), chosenVB, lnr);
 
   // Skolemize the intersecting acceptor and its messages
   var acc := GetIntersectingAcceptor(c, v, accQ, chosenVB, promQ, promBal);
@@ -276,12 +288,9 @@ returns (accs: set<AcceptorId>)
 
 lemma ExtractAcceptMessagesFromReceivedAccepts(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, vb: ValBal, lnr: LearnerId)
 returns (acceptMsgs: set<Message>)
-  requires v.WF(c)
-  requires ValidHistory(c, v)
-  requires LearnerHostReceiveValidity(c, v)
+  requires RegularInvs(c, v)
   requires 0 <= lnr < |c.learners|
-  requires vb in v.Last().learners[lnr].receivedAccepts.m
-  requires receivedAccepts <= v.Last().learners[lnr].receivedAccepts.m[vb]
+  requires receivedAccepts <= LearnerAcceptorsAtBallot(c, v.Last(), lnr, vb.v, vb.b)
   ensures |acceptMsgs| == |receivedAccepts|
   ensures forall m | m in acceptMsgs :: IsAcceptMessage(v, m) && m.vb == vb
   ensures MessageSetDistinctAccs(acceptMsgs)
@@ -289,12 +298,15 @@ returns (acceptMsgs: set<Message>)
   decreases receivedAccepts
 {
   reveal_MessageSetDistinctAccs();
-  if | receivedAccepts | == 0 {
+  if |receivedAccepts| == 0 {
     acceptMsgs := {};
   } else {
     var x :| x in receivedAccepts;
     var subset := ExtractAcceptMessagesFromReceivedAccepts(c, v, receivedAccepts - {x}, vb, lnr);
     reveal_ValidHistory();
+    ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, vb, x);
+    assert MessageInv(c, v);
+    reveal_LearnerHostReceiveValidity();
     var i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, x);
     acceptMsgs := subset + {msg};
   }
@@ -413,9 +425,15 @@ returns (proposeMsg: Message)
   ensures proposeMsg == Propose(vb.b, vb.v)
 {
   reveal_ChosenAtLearner();
-  var lnr: nat :| ChosenAtLearner(c, v.History(i), vb, lnr);
-  var acc :| acc in v.History(i).learners[lnr].receivedAccepts.m[vb];
+  assert v.WF(c);
+  assert v.History(i).WF(c);
+  var lnr := ChosenLearnerWitness(c, v.History(i), vb);
+  assert 0 < |LearnerAcceptorsAtBallot(c, v.History(i), lnr, vb.v, vb.b)|;
+  var acc :| acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, vb.v, vb.b);
   reveal_ValidHistory();
+  ReceiveAcceptWitnessFromMembership(c, v, i, lnr, vb, acc);
+  assert MessageInv(c, v);
+  reveal_LearnerHostReceiveValidity();
   var j, accMsg := ReceiveAcceptStepSkolemization(c, v, i, lnr, vb, acc);
   var k, prop := SendAcceptSkolemization(c, v, accMsg);
   return prop;
@@ -425,16 +443,20 @@ lemma LearnerValidReceivedAccepts(c: Constants, v: Variables, i: nat, lnr: Learn
   requires RegularInvs(c, v)
   requires v.ValidHistoryIdx(i)
   requires c.ValidLearnerIdx(lnr)
-  ensures forall vb, acc |  && vb in v.History(i).learners[lnr].receivedAccepts.m
-                            && acc in v.History(i).learners[lnr].receivedAccepts.m[vb]
-          :: c.ValidAcceptorIdx(acc)
+  ensures forall val: Value, bal: LeaderId, acc: AcceptorId |
+    acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, val, bal)
+    :: c.ValidAcceptorIdx(acc)
 {
-  forall vb, acc |
-    && vb in v.History(i).learners[lnr].receivedAccepts.m
-    && acc in v.History(i).learners[lnr].receivedAccepts.m[vb]
-  ensures c.ValidAcceptorIdx(acc) {
-    reveal_ValidHistory();
-    var j, accMsg := ReceiveAcceptStepSkolemization(c, v, i, lnr, vb, acc);
+  reveal_ValidHistory();
+  assert MessageInv(c, v);
+  reveal_LearnerHostReceiveValidity();
+  forall val: Value, bal: LeaderId, acc: AcceptorId |
+    acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, val, bal)
+  ensures c.ValidAcceptorIdx(acc)
+  {
+    var vb := VB(val, bal);
+    ReceiveAcceptWitnessFromMembership(c, v, i, lnr, vb, acc);
+    var _, accMsg := ReceiveAcceptStepSkolemization(c, v, i, lnr, vb, acc);
   }
 }
 
@@ -481,18 +503,134 @@ lemma AtMostOneChosenImpliesSafety(c: Constants, v: Variables)
 *                                  Helper Definitions                                  *
 ***************************************************************************************/
 
+ghost function LearnerAcceptorsForRange(c: Constants, v: Hosts, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId) : set<AcceptorId>
+  requires v.WF(c)
+  requires c.ValidLearnerIdx(lnr)
+  requires lo <= hi
+{
+  LearnerHost.AcceptorsOverRange(v.learners[lnr].receivedAccepts, val, lo, hi)
+}
+
+ghost function LearnerAcceptorsAtBallot(c: Constants, v: Hosts, lnr: LearnerId, val: Value, bal: LeaderId) : set<AcceptorId>
+  requires v.WF(c)
+  requires c.ValidLearnerIdx(lnr)
+{
+  v.learners[lnr].receivedAccepts.AcceptorsForValueAtBallot(val, bal)
+}
+
+ghost predicate ConsecutiveAcceptWitness(c: Constants, v: Hosts, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId)
+  requires v.WF(c)
+{
+  && c.ValidLearnerIdx(lnr)
+  && lo <= hi
+  && LearnerHost.ConsecutiveRangeCovered(v.learners[lnr].receivedAccepts, val, lo, hi)
+  && |LearnerAcceptorsForRange(c, v, lnr, val, lo, hi)| >= c.f + 1
+}
+
 ghost predicate Chosen(c: Constants, v: Hosts, vb: ValBal)
   requires v.WF(c)
 {
   exists lnr :: ChosenAtLearner(c, v, vb, lnr)
 }
 
+ghost predicate {:opaque} ChosenAtLearnerRange(c: Constants, v: Hosts, vb: ValBal, lnr: LearnerId, lo: LeaderId, hi: LeaderId)
+  requires v.WF(c)
+{
+  && ConsecutiveAcceptWitness(c, v, lnr, vb.v, lo, hi)
+  && lo <= vb.b && vb.b <= hi
+  && 0 < |LearnerAcceptorsAtBallot(c, v, lnr, vb.v, vb.b)|
+}
+
 ghost predicate {:opaque} ChosenAtLearner(c: Constants, v: Hosts, vb: ValBal, lnr: LearnerId)
   requires v.WF(c)
 {
-  && c.ValidLearnerIdx(lnr)
-  && vb in v.learners[lnr].receivedAccepts.m
-  && IsAcceptorQuorum(c, v.learners[lnr].receivedAccepts.m[vb])
+  exists lo: LeaderId, hi: LeaderId :: ChosenAtLearnerRange(c, v, vb, lnr, lo, hi)
+}
+
+lemma ChosenLearnerWitness(c: Constants, v: Hosts, vb: ValBal)
+returns (lnr: LearnerId)
+  requires v.WF(c)
+  requires Chosen(c, v, vb)
+  ensures ChosenAtLearner(c, v, vb, lnr)
+{
+  lnr :| ChosenAtLearner(c, v, vb, lnr);
+}
+
+lemma ChosenAtLearnerRangeWitness(c: Constants, v: Hosts, vb: ValBal, lnr: LearnerId)
+returns (lo: LeaderId, hi: LeaderId)
+  requires v.WF(c)
+  requires ChosenAtLearner(c, v, vb, lnr)
+  ensures ChosenAtLearnerRange(c, v, vb, lnr, lo, hi)
+{
+  reveal_ChosenAtLearner();
+  lo, hi :| ChosenAtLearnerRange(c, v, vb, lnr, lo, hi);
+}
+
+lemma LearnerInitialAcceptorsEmpty(c: Constants, v: Variables, lnr: LearnerId, val: Value, bal: LeaderId)
+  requires RegularInvs(c, v)
+  requires c.ValidLearnerIdx(lnr)
+  ensures LearnerAcceptorsAtBallot(c, v.History(0), lnr, val, bal) == {}
+{
+  reveal_ValidHistory();
+  assert InitHosts(c, v.History(0));
+  assert LearnerHost.GroupInit(c.learners, v.History(0).learners, c.f);
+  assert LearnerHost.Init(c.learners[lnr], v.History(0).learners[lnr]);
+  assert v.History(0).learners[lnr].receivedAccepts == MVA(map[]);
+}
+
+lemma ReceiveAcceptWitnessFromMembership(c: Constants, v: Variables, i: nat, lnr: LearnerId, vb: ValBal, acc: AcceptorId)
+  requires RegularInvs(c, v)
+  requires v.ValidHistoryIdx(i)
+  requires c.ValidLearnerIdx(lnr)
+  requires acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, vb.v, vb.b)
+  ensures ReceiveAcceptWitnessCondition(c, v, i, lnr, vb, acc)
+{
+  reveal_ValidHistory();
+  assert InitHosts(c, v.History(0));
+  LearnerInitialAcceptorsEmpty(c, v, lnr, vb.v, vb.b);
+  assert ReceiveAcceptWitnessCondition(c, v, i, lnr, vb, acc) by {
+    assert acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, vb.v, vb.b);
+    assert v.History(0).learners[lnr].receivedAccepts.AcceptorsForValueAtBallot(vb.v, vb.b) == {};
+    assert acc !in LearnerAcceptorsAtBallot(c, v.History(0), lnr, vb.v, vb.b);
+    assert LearnerAcceptorsAtBallot(c, v.History(i), lnr, vb.v, vb.b) != LearnerAcceptorsAtBallot(c, v.History(0), lnr, vb.v, vb.b);
+  }
+}
+
+lemma LearnerRangeAccHasBallot(c: Constants, hosts: Hosts, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId, acc: AcceptorId)
+returns (bal: LeaderId)
+  requires hosts.WF(c)
+  requires ConsecutiveAcceptWitness(c, hosts, lnr, val, lo, hi)
+  requires acc in LearnerAcceptorsForRange(c, hosts, lnr, val, lo, hi)
+  ensures lo <= bal <= hi
+  ensures acc in LearnerAcceptorsAtBallot(c, hosts, lnr, val, bal)
+{
+  bal :|
+    && lo <= bal <= hi
+    && acc in LearnerAcceptorsAtBallot(c, hosts, lnr, val, bal);
+}
+
+lemma RangeAcceptMessageWitness(c: Constants, v: Variables, i: nat, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId, acc: AcceptorId)
+returns (msg: Message)
+  requires RegularInvs(c, v)
+  requires v.ValidHistoryIdx(i)
+  requires c.ValidLearnerIdx(lnr)
+  requires ConsecutiveAcceptWitness(c, v.History(i), lnr, val, lo, hi)
+  requires acc in LearnerAcceptorsForRange(c, v.History(i), lnr, val, lo, hi)
+  ensures IsAcceptMessage(v, msg)
+  ensures msg.acc == acc
+  ensures msg.vb.v == val
+  ensures lo <= msg.vb.b <= hi
+{
+  reveal_ValidHistory();
+  var bal := LearnerRangeAccHasBallot(c, v.History(i), lnr, val, lo, hi, acc);
+  var vb := VB(val, bal);
+  assert MessageInv(c, v);
+  reveal_LearnerHostReceiveValidity();
+  ReceiveAcceptWitnessFromMembership(c, v, i, lnr, vb, acc);
+  var j, inMsg := ReceiveAcceptStepSkolemization(c, v, i, lnr, vb, acc);
+  msg := inMsg;
+  assert IsAcceptMessage(v, msg);
+  assert msg.vb == vb;
 }
 
 ghost predicate IsAcceptorQuorum(c: Constants, quorum: set<AcceptorId>) {

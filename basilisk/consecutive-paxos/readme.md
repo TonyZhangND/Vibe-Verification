@@ -6,4 +6,6 @@ Hosts can receive and send messages in the same step.
 
 Begin with pure Paxos. Then ask LLM to write consecutive Paxos, and prove it correct.
 
-* Agent was able to come up with correct consecutive Paxos protocol spec.
+* Codex was able to come up with correct consecutive Paxos protocol spec.
+* Codex kinda struggles with the proofs. It can't even get syntax right, ad keep trying add semicolons at the end of `assert-by` statements, which are not needed.
+  * Gonna switch to Sonnet.
