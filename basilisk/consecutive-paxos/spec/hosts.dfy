@@ -413,14 +413,89 @@ module LearnerHost {
       out.AcceptorsForValue(val) == receivedAccepts.AcceptorsForValue(val)
     ensures out.SatisfiesMonotonic(receivedAccepts)
   {
-    if vb.v in receivedAccepts.m then
+    var result := if vb.v in receivedAccepts.m then
       MVA(receivedAccepts.m[vb.v :=
         (if vb.b in receivedAccepts.m[vb.v]
          then receivedAccepts.m[vb.v][vb.b := receivedAccepts.m[vb.v][vb.b] + {acc}]
          else receivedAccepts.m[vb.v][vb.b := {acc}]
         )])
     else
-      MVA(receivedAccepts.m[vb.v := SingletonBallotAcceptors(vb.b, acc)])
+      MVA(receivedAccepts.m[vb.v := SingletonBallotAcceptors(vb.b, acc)]);
+    UpdateReceivedAcceptsMonotonic(receivedAccepts, vb, acc, result);
+    result
+  }
+  
+  lemma UpdateReceivedAcceptsMonotonic(receivedAccepts: MonotonicValueAccepts, vb: ValBal, acc: AcceptorId, result: MonotonicValueAccepts)
+    requires result == (if vb.v in receivedAccepts.m then
+      MVA(receivedAccepts.m[vb.v :=
+        (if vb.b in receivedAccepts.m[vb.v]
+         then receivedAccepts.m[vb.v][vb.b := receivedAccepts.m[vb.v][vb.b] + {acc}]
+         else receivedAccepts.m[vb.v][vb.b := {acc}]
+        )])
+    else
+      MVA(receivedAccepts.m[vb.v := SingletonBallotAcceptors(vb.b, acc)]))
+    ensures result.SatisfiesMonotonic(receivedAccepts)
+  {
+    if vb.v in receivedAccepts.m {
+      var oldPerVal := receivedAccepts.m[vb.v];
+      if vb.b in oldPerVal {
+        // Branch 1: Value exists, ballot exists - adding acceptor to existing set
+        forall val | val in receivedAccepts.m
+        ensures val in result.m
+        ensures forall bal | bal in receivedAccepts.m[val] ::
+          && bal in result.m[val]
+          && receivedAccepts.m[val][bal] <= result.m[val][bal]
+          && |receivedAccepts.m[val][bal]| <= |result.m[val][bal]|
+        {
+          if val == vb.v {
+            forall bal | bal in receivedAccepts.m[val]
+            ensures bal in result.m[val]
+            ensures receivedAccepts.m[val][bal] <= result.m[val][bal]
+            ensures |receivedAccepts.m[val][bal]| <= |result.m[val][bal]|
+            {
+              if bal == vb.b {
+                var oldSet := oldPerVal[vb.b];
+                var newSet := oldSet + {acc};
+                UnionIncreasesCardinality(oldSet, {acc});
+                assert oldSet <= newSet;
+                assert |oldSet| <= |newSet|;
+              }
+            }
+          }
+        }
+      } else {
+        // Branch 2: Value exists, ballot new - adding new ballot with singleton set
+        forall val | val in receivedAccepts.m
+        ensures val in result.m
+        ensures forall bal | bal in receivedAccepts.m[val] ::
+          && bal in result.m[val]
+          && receivedAccepts.m[val][bal] <= result.m[val][bal]
+          && |receivedAccepts.m[val][bal]| <= |result.m[val][bal]|
+        {
+          if val == vb.v {
+            forall bal | bal in receivedAccepts.m[val]
+            ensures bal in result.m[val]
+            ensures receivedAccepts.m[val][bal] <= result.m[val][bal]
+            ensures |receivedAccepts.m[val][bal]| <= |result.m[val][bal]|
+            {
+              assert bal != vb.b;
+            }
+          }
+        }
+      }
+    } else {
+      // Branch 3: Value new - adding new value with singleton ballot map
+      forall val | val in receivedAccepts.m
+      ensures val in result.m
+      ensures forall bal | bal in receivedAccepts.m[val] ::
+        && bal in result.m[val]
+        && receivedAccepts.m[val][bal] <= result.m[val][bal]
+        && |receivedAccepts.m[val][bal]| <= |result.m[val][bal]|
+      {
+        assert val != vb.v;
+        assert result.m[val] == receivedAccepts.m[val];
+      }
+    }
   }
 
   ghost function AcceptorsOverRange(receivedAccepts: MonotonicValueAccepts, val: Value, lo: LeaderId, hi: LeaderId) : set<AcceptorId>
