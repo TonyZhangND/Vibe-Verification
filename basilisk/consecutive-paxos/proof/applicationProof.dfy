@@ -386,7 +386,25 @@ returns (accs: set<AcceptorId>)
   }
 }
 
-lemma ExtractAcceptMessagesFromReceivedAccepts(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, vb: ValBal, lnr: LearnerId)
+// Helper lemma to extract a single accept message
+lemma ExtractSingleAcceptMessage(c: Constants, v: Variables, lnr: LearnerId, vb: ValBal, acc: AcceptorId)
+returns (msg: Message)
+  requires RegularInvs(c, v)
+  requires 0 <= lnr < |c.learners|
+  requires acc in LearnerAcceptorsAtBallot(c, v.Last(), lnr, vb.v, vb.b)
+  ensures IsAcceptMessage(v, msg)
+  ensures msg.vb == vb
+  ensures msg.acc == acc
+  ensures msg == Accept(vb, acc)
+{
+  reveal_ValidHistory();
+  ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, vb, acc);
+  reveal_LearnerHostReceiveValidity();
+  var i;
+  i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, acc);
+}
+
+lemma {:fuel MessageSetDistinctAccs,0,0} ExtractAcceptMessagesFromReceivedAccepts(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, vb: ValBal, lnr: LearnerId)
 returns (acceptMsgs: set<Message>)
   requires RegularInvs(c, v)
   requires 0 <= lnr < |c.learners|
@@ -403,24 +421,35 @@ returns (acceptMsgs: set<Message>)
   } else {
     var x :| x in receivedAccepts;
     var subset := ExtractAcceptMessagesFromReceivedAccepts(c, v, receivedAccepts - {x}, vb, lnr);
-    // Explicit assertions to help the verifier
-    assert |subset| == |receivedAccepts - {x}|;
-    assert forall m | m in subset :: IsAcceptMessage(v, m) && m.vb == vb;
-    reveal_ValidHistory();
-    ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, vb, x);
-    reveal_LearnerHostReceiveValidity();
-    var i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, x);
-    assert msg.vb == vb;
-    assert msg.acc == x;
+    var msg := ExtractSingleAcceptMessage(c, v, lnr, vb, x);
     acceptMsgs := subset + {msg};
-    // Help verifier see the postconditions hold
-    assert |acceptMsgs| == |receivedAccepts|;
-    assert msg !in subset;
   }
 }
 
+// Helper lemma to extract a single accept message from a range
+lemma ExtractSingleAcceptMessageFromRange(c: Constants, v: Variables, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId, acc: AcceptorId)
+returns (msg: Message)
+  requires RegularInvs(c, v)
+  requires 0 <= lnr < |c.learners|
+  requires lo <= hi
+  requires ConsecutiveAcceptWitness(c, v.Last(), lnr, val, lo, hi)
+  requires acc in LearnerAcceptorsForRange(c, v.Last(), lnr, val, lo, hi)
+  ensures IsAcceptMessage(v, msg)
+  ensures msg.vb.v == val
+  ensures lo <= msg.vb.b <= hi
+  ensures msg.acc == acc
+{
+  var bal := LearnerRangeAccHasBallot(c, v.Last(), lnr, val, lo, hi, acc);
+  var vb := VB(val, bal);
+  reveal_ValidHistory();
+  ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, vb, acc);
+  reveal_LearnerHostReceiveValidity();
+  var i;
+  i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, acc);
+}
+
 // New version that works with accepts from a range of ballots
-lemma ExtractAcceptMessagesFromRange(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, val: Value, lo: LeaderId, hi: LeaderId, lnr: LearnerId)
+lemma {:fuel MessageSetDistinctAccs,0,0} ExtractAcceptMessagesFromRange(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, val: Value, lo: LeaderId, hi: LeaderId, lnr: LearnerId)
 returns (acceptMsgs: set<Message>)
   requires RegularInvs(c, v)
   requires 0 <= lnr < |c.learners|
@@ -439,24 +468,14 @@ returns (acceptMsgs: set<Message>)
   } else {
     var x :| x in receivedAccepts;
     var subset := ExtractAcceptMessagesFromRange(c, v, receivedAccepts - {x}, val, lo, hi, lnr);
-    // Explicit assertions from recursive call
-    assert |subset| == |receivedAccepts - {x}|;
-    assert forall m | m in subset :: IsAcceptMessage(v, m) && m.vb.v == val && lo <= m.vb.b <= hi;
-    // Find which ballot this acceptor accepted at
-    var bal := LearnerRangeAccHasBallot(c, v.Last(), lnr, val, lo, hi, x);
-    assert lo <= bal <= hi;
-    var vb := VB(val, bal);
-    reveal_ValidHistory();
-    ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, vb, x);
-    reveal_LearnerHostReceiveValidity();
-    var i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, x);
-    assert msg.vb == vb;
+    var msg := ExtractSingleAcceptMessageFromRange(c, v, lnr, val, lo, hi, x);
+    // Verify msg is not in subset (distinct acceptors)
     assert msg.acc == x;
-    assert lo <= msg.vb.b <= hi;
-    acceptMsgs := subset + {msg};
-    // Help verifier with postconditions
-    assert |acceptMsgs| == |receivedAccepts|;
+    assert forall m | m in subset :: m.acc != x;
     assert msg !in subset;
+    acceptMsgs := subset + {msg};
+    // Verify postconditions
+    assert |acceptMsgs| == |receivedAccepts|;
   }
 }
 
