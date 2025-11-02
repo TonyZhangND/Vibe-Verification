@@ -404,7 +404,7 @@ returns (msg: Message)
   i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, acc);
 }
 
-lemma {:fuel MessageSetDistinctAccs,0,0} ExtractAcceptMessagesFromReceivedAccepts(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, vb: ValBal, lnr: LearnerId)
+lemma ExtractAcceptMessagesFromReceivedAccepts(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, vb: ValBal, lnr: LearnerId)
 returns (acceptMsgs: set<Message>)
   requires RegularInvs(c, v)
   requires 0 <= lnr < |c.learners|
@@ -449,7 +449,7 @@ returns (msg: Message)
 }
 
 // New version that works with accepts from a range of ballots
-lemma {:fuel MessageSetDistinctAccs,0,0} ExtractAcceptMessagesFromRange(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, val: Value, lo: LeaderId, hi: LeaderId, lnr: LearnerId)
+lemma ExtractAcceptMessagesFromRange(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, val: Value, lo: LeaderId, hi: LeaderId, lnr: LearnerId)
 returns (acceptMsgs: set<Message>)
   requires RegularInvs(c, v)
   requires 0 <= lnr < |c.learners|
