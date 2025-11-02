@@ -23,7 +23,9 @@ Teach AI agents how to:
 
 - Never write assume statements
 - Never add requires clauses to existing predicates, functions, or lemmas
-- Never write `assume(false)` or `requires false`
+- Never write `assume` statements
+- Never write `requires false` as a precondition
+- A proof is successful only when there are no assertion errors, and no timeouts.
 
 ### General practices
 
