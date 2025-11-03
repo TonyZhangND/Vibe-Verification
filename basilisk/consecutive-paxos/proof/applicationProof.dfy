@@ -222,38 +222,22 @@ returns (promMsg: Message)
   ensures IsPromiseMessage(v, promMsg)
   ensures promMsg in promQ
   ensures promMsg.vbOpt.Some?
-  ensures promMsg.vbOpt.value.v == chosenVB.v
   ensures chosenVB.b <= promMsg.vbOpt.value.b
 {
-  
+  // Get Accept quorum from chosen range
   var lnr, lo, hi, accRange := GetChosenRangeWitnesses(c, v, chosenVB);
-  
-  var promAccs := AcceptorsFromPromiseSet(c, v, promQ, promBal);
-  var allAccs := set id | 0 <= id < 2*c.f+1;
-  SetComprehensionSize(2*c.f+1);
-  
-  LearnerValidReceivedAccepts(c, v, |v.history|-1, lnr);
-  LearnerRangeAcceptorsAreValid(c, v, |v.history|-1, lnr, chosenVB.v, lo, hi);
-  
-  var commonAcc := QuorumIntersection(allAccs, promAccs, accRange);
-  var acceptBal := LearnerRangeAccHasBallot(c, v.Last(), lnr, chosenVB.v, lo, hi, commonAcc);
-  
-  promMsg :| promMsg in promQ && promMsg.Promise? && promMsg.acc == commonAcc;
-  
-  // Extract the accept and promise messages
-  var accVB := VB(chosenVB.v, acceptBal);
-  ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, accVB, commonAcc);
-  reveal_LearnerHostReceiveValidity();
-  var j, accMsg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, accVB, commonAcc);
+  var accQ := ExtractAcceptMessagesFromRange(c, v, lnr, chosenVB.v, lo, hi, accRange);
+
+  // Skolemize the intersecting acceptor
+  var acc := GetIntersectingAcceptorFromRange(c, v, accQ, chosenVB.v, lo, hi, promQ, promBal);
+  var accMsg :| accMsg in accQ && accMsg.acc == acc;
+  promMsg :| promMsg in promQ && promMsg.Promise? && promMsg.acc == acc;
+
   var i, inMsg := SendPromiseSkolemization(c, v, promMsg);
+  var j, propMsg := SendAcceptSkolemization(c, v, accMsg);
   
-  if acceptBal < promBal {
-    ChosenImpliesSeenByHigherPromiseQuorumHelper(c, v, chosenVB, inMsg, promMsg, promBal, i, accMsg, accMsg, j);
-  } else {
-    // acceptBal >= promBal: This case should be rare/impossible in practice
-    // TODO: Complete this proof or show it's truly unreachable
-    assume false;
-  }
+  // Helper proves the temporal reasoning
+  ChosenImpliesSeenByHigherPromiseQuorumHelper(c, v, chosenVB, inMsg, promMsg, promBal, i, propMsg, accMsg, j);
 }
 
 // Fixed helper: proves promise witnesses the ACCEPT ballot (which is in the chosen range)
@@ -470,8 +454,11 @@ returns (msg: Message)
 // Helper lemma to extract a single accept message from a range
 lemma ExtractSingleAcceptMessageFromRange(c: Constants, v: Variables, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId, acc: AcceptorId)
 returns (msg: Message)
-  requires RegularInvs(c, v)
-  requires 0 <= lnr < |c.learners|
+  requires v.WF(c)
+  requires ValidHistory(c, v)
+  requires LearnerHostReceiveValidity(c, v)
+  requires ValidVariables(c, v)
+  requires c.ValidLearnerIdx(lnr)
   requires lo <= hi
   requires ConsecutiveAcceptWitness(c, v.Last(), lnr, val, lo, hi)
   requires acc in LearnerAcceptorsForRange(c, v.Last(), lnr, val, lo, hi)
@@ -487,6 +474,67 @@ returns (msg: Message)
   reveal_LearnerHostReceiveValidity();
   var i;
   i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, acc);
+}
+
+// Extract Accept messages from a range of ballots for building accept quorum
+lemma ExtractAcceptMessagesFromRange(c: Constants, v: Variables, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId, accs: set<AcceptorId>)
+returns (acceptMsgs: set<Message>)
+  requires v.WF(c)
+  requires ValidHistory(c, v)
+  requires LearnerHostReceiveValidity(c, v)
+  requires c.ValidLearnerIdx(lnr)
+  requires lo <= hi
+  requires ConsecutiveAcceptWitness(c, v.Last(), lnr, val, lo, hi)
+  requires accs <= LearnerAcceptorsForRange(c, v.Last(), lnr, val, lo, hi)
+  ensures |acceptMsgs| == |accs|
+  ensures forall m | m in acceptMsgs :: 
+    && IsAcceptMessage(v, m) 
+    && m.vb.v == val 
+    && lo <= m.vb.b <= hi
+  ensures MessageSetDistinctAccs(acceptMsgs)
+  ensures forall acc :: acc in accs <==> (exists m :: m in acceptMsgs && m.acc == acc)
+  decreases accs
+{
+  reveal_MessageSetDistinctAccs();
+  if |accs| == 0 {
+    acceptMsgs := {};
+  } else {
+    var acc :| acc in accs;
+    var subset := ExtractAcceptMessagesFromRange(c, v, lnr, val, lo, hi, accs - {acc});
+    var msg := ExtractSingleAcceptMessageFromRange(c, v, lnr, val, lo, hi, acc);
+    acceptMsgs := subset + {msg};
+    // Help Dafny see that msg is distinct from messages in subset
+    assert msg.acc == acc;
+    assert forall m | m in subset :: m.acc != acc;
+    assert MessageSetDistinctAccs(acceptMsgs);
+    
+    // Prove the bidirectional correspondence
+    forall a | a in accs
+    ensures exists m :: m in acceptMsgs && m.acc == a
+    {
+      if a == acc {
+        assert msg in acceptMsgs && msg.acc == a;
+      } else {
+        assert a in accs - {acc};
+        assert exists m :: m in subset && m.acc == a;
+        var m :| m in subset && m.acc == a;
+        assert m in acceptMsgs;
+      }
+    }
+    
+    forall m | m in acceptMsgs
+    ensures m.acc in accs
+    {
+      if m == msg {
+        assert m.acc == acc;
+        assert acc in accs;
+      } else {
+        assert m in subset;
+        assert m.acc in accs - {acc};
+        assert m.acc in accs;
+      }
+    }
+  }
 }
 
 lemma GetPromiseQuorumForProposeMessage(c: Constants, v: Variables, chosenVB: ValBal, propMsg: Message, bal: LeaderId, val: Value)
