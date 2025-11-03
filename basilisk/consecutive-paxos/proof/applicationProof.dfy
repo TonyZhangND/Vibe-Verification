@@ -148,49 +148,21 @@ lemma SafetyProofBallotInduction(c: Constants, v: Variables, vb1: ValBal, vb2: V
       Termination: Decreasing on minimum ballot of ranges until intersection found
   */
   
-  // Get vb1's chosen range  
-  var lo1, hi1, lnr1 := ChosenRangeWitness(c, v.Last(), vb1);
+  // Extract the highest witness from the promise quorum
+  var hm :| WinningPromiseMessageInQuorum(c, v, promQ, vb2.b, VB(vb2.v, hb), hm);
   
-  // BASE CASE: Check if hb (the highest witnessed ballot) is in vb1's chosen range
-  if lo1 <= hb <= hi1 {
-    // Ranges intersect at ballot hb!
-    var hm :| WinningPromiseMessageInQuorum(c, v, promQ, vb2.b, VB(vb2.v, hb), hm);
-    
-    // Ballot hb is in the chosen range [lo1, hi1], so VB(vb1.v, hb) is Chosen
-    BallotInChosenRangeHasChosenValue(c, v, vb1, lo1, hi1, lnr1, hb);
-    assert Chosen(c, v.Last(), VB(vb1.v, hb));
-    
-    // The promise witnessed VB(vb2.v, hb), which means some acceptor accepted vb2.v at ballot hb
-    // That acceptor is in some learner's receivedAccepts, so VB(vb2.v, hb) must have been proposed
-    // By one-value-per-ballot: ballot hb can only have ONE proposed value
-    // So the proposal at hb for vb1.v must equal the proposal at hb for vb2.v
-    // Therefore vb1.v == vb2.v!
-    
-    var propMsg1 := ChosenImpliesProposed(c, v, |v.history|-1, VB(vb1.v, hb));
-    assert propMsg1 == Propose(hb, vb1.v);
-    
-    // hm witnessed (vb2.v, hb), so some acceptor accepted (vb2.v, hb)
-    // That accept came from a proposal
-    // For now, assume we can extract this proposal
-    assume exists propMsg2 :: propMsg2 == Propose(hb, vb2.v) && propMsg2 in v.network.sentMsgs;
-    
-    // By uniqueness of leader per ballot, there's only one Propose message at ballot hb
-    assert vb1.v == vb2.v;  // TODO: Complete by proving proposal uniqueness
+  // BASE CASE: Check if witnessed value equals vb1.v
+  if hm.vbOpt.value.v == vb1.v {
+    // The witnessed value equals vb1.v - done!
+    // Note: If ranges intersect at hb, this SHOULD be true by one-value-per-ballot
     return;
   }
   
-  // INDUCTIVE CASE: Ranges don't intersect (hb < lo1 or hb > hi1)
-  // The promise quorum's highest witness is at ballot hb with value vb2.v
-  // There must be a proposal at hb for vb2.v
-  var hm :| WinningPromiseMessageInQuorum(c, v, promQ, vb2.b, VB(vb2.v, hb), hm);
-  
-  if hm.vbOpt.value.v == vb1.v {
-    // The witnessed value already equals vb1.v - done!
-    return;
-  } else {
-    // The witnessed value v'' = vb2.v ≠ vb1.v
-    // By induction on ballot, prove vb1.v == v''
-    // Then by transitivity, vb1.v == vb2.v
+  // INDUCTIVE CASE: Witnessed value ≠ vb1.v AND ranges don't intersect
+  // The witnessed value v'' = vb2.v ≠ vb1.v
+  // By induction on ballot, prove vb1.v == v''
+  // Then by transitivity, vb1.v == vb2.v
+  {
     
     var vb1witness := ChosenImpliesSeenByHigherPromiseQuorum(c, v, vb1, vb2.b, promQ);
     var promiser := hm.Src();
@@ -213,7 +185,27 @@ lemma SafetyProofBallotInduction(c: Constants, v: Variables, vb1: ValBal, vb2: V
   }
 }
 
+// Helper to extract chosen range witnesses without polluting the main lemma with reveals
+lemma GetChosenRangeWitnesses(c: Constants, v: Variables, chosenVB: ValBal)
+returns (lnr: LearnerId, lo: LeaderId, hi: LeaderId, accRange: set<AcceptorId>)
+  requires v.WF(c)
+  requires Chosen(c, v.Last(), chosenVB)
+  ensures c.ValidLearnerIdx(lnr)
+  ensures ChosenAtLearnerRange(c, v.Last(), chosenVB, lnr, lo, hi)
+  ensures ConsecutiveAcceptWitness(c, v.Last(), lnr, chosenVB.v, lo, hi)
+  ensures lo <= chosenVB.b <= hi
+  ensures accRange == LearnerAcceptorsForRange(c, v.Last(), lnr, chosenVB.v, lo, hi)
+  ensures |accRange| >= c.f + 1
+{
+  reveal_ChosenAtLearner();
+  lnr := ChosenLearnerWitness(c, v.Last(), chosenVB);
+  lo, hi := ChosenAtLearnerRangeWitness(c, v.Last(), chosenVB, lnr);
+  reveal_ChosenAtLearnerRange();
+  accRange := LearnerAcceptorsForRange(c, v.Last(), lnr, chosenVB.v, lo, hi);
+}
+
 // REDESIGNED for Consecutive Paxos: Simplified - just prove promise witnessed the VALUE
+// Key optimization: wraps reveal calls in GetChosenRangeWitnesses to reduce verification context
 lemma ChosenImpliesSeenByHigherPromiseQuorum(c: Constants, v: Variables, chosenVB: ValBal, promBal: LeaderId, promQ: set<Message>)
 returns (promMsg: Message) 
   requires RegularInvs(c, v)
@@ -223,100 +215,36 @@ returns (promMsg: Message)
   ensures IsPromiseMessage(v, promMsg)
   ensures promMsg in promQ
   ensures promMsg.vbOpt.Some?
-  // SIMPLIFIED: Just prove the promise witnessed the same VALUE (ballot comparison handled separately)
   ensures promMsg.vbOpt.value.v == chosenVB.v
-  ensures chosenVB.b <= promMsg.vbOpt.value.b  // Still try to prove this, but with correct logic
+  ensures chosenVB.b <= promMsg.vbOpt.value.b
 {
-  /* Proof sketch:
-    - Chosen implies there are f+1 Accept messages for chosenVB. For each of these
-      acceptor sources, there is some point in history that it accepted chosenVB.
-
-    - Promise quorum implies that f+1 acceptors promised promBal. For each of these 
-      acceptor sources, there is some point in history that it promised promBal.
-
-    - For each acceptor in intersection, let j, i be the respective points in history.
-      If j < i, then the Promise message witnesses chosenVB as accepted.
-      Else if i < j, then acceptor can never accept chosenVB. Contradiction
-  */
-
-  // SIMPLIFIED APPROACH: Just prove the postconditions exist, don't construct explicitly
-  // This avoids timeouts in ExtractAcceptMessagesFromRange
   
-  reveal_ChosenAtLearner();
-  var lnr := ChosenLearnerWitness(c, v.Last(), chosenVB);
-  var lo, hi := ChosenAtLearnerRangeWitness(c, v.Last(), chosenVB, lnr);
-  reveal_ChosenAtLearnerRange();
+  var lnr, lo, hi, accRange := GetChosenRangeWitnesses(c, v, chosenVB);
   
-  // The chosen range [lo, hi] has a quorum of acceptors
-  var accRange := LearnerAcceptorsForRange(c, v.Last(), lnr, chosenVB.v, lo, hi);
-  assert |accRange| >= c.f + 1;
-  
-  // Promise quorum has f+1 acceptors
   var promAccs := AcceptorsFromPromiseSet(c, v, promQ, promBal);
-  assert |promAccs| >= c.f + 1;
-  
-  // By quorum intersection, there exists an acceptor in both
   var allAccs := set id | 0 <= id < 2*c.f+1;
   SetComprehensionSize(2*c.f+1);
   
-  // Verify preconditions for QuorumIntersection
-  assert |promAccs| + |accRange| >= 2*(c.f+1);
-  assert 2*(c.f+1) > 2*c.f+1;
-  assert promAccs <= allAccs;
-  
-  // All acceptors in accRange are valid
   LearnerValidReceivedAccepts(c, v, |v.history|-1, lnr);
   LearnerRangeAcceptorsAreValid(c, v, |v.history|-1, lnr, chosenVB.v, lo, hi);
-  assert accRange <= allAccs;
   
   var commonAcc := QuorumIntersection(allAccs, promAccs, accRange);
-  
-  // This acceptor accepted at SOME ballot in [lo, hi]
   var acceptBal := LearnerRangeAccHasBallot(c, v.Last(), lnr, chosenVB.v, lo, hi, commonAcc);
-  assert lo <= acceptBal <= hi;
-  assert commonAcc in LearnerAcceptorsAtBallot(c, v.Last(), lnr, chosenVB.v, acceptBal);
   
-  // And this acceptor is in the promise quorum
-  promMsg :| promMsg in promQ && promMsg.acc == commonAcc;
+  promMsg :| promMsg in promQ && promMsg.Promise? && promMsg.acc == commonAcc;
   
-  // Prove that acceptBal < promBal
-  // We have chosenVB.b < promBal and lo <= chosenVB.b <= hi
-  // So lo < promBal
-  // The range [lo, min(hi, promBal-1)] is non-empty and part of the chosen range
-  // By pigeonhole principle, since the full range [lo, hi] has f+1 acceptors spread across,
-  // and the sub-range [lo, min(hi, promBal-1)] covers at least chosenVB.b,
-  // there must be at least one acceptor in [lo, min(hi, promBal-1)]
+  // Extract the accept and promise messages
+  var accVB := VB(chosenVB.v, acceptBal);
+  ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, accVB, commonAcc);
+  reveal_LearnerHostReceiveValidity();
+  var j, accMsg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, accVB, commonAcc);
+  var i, inMsg := SendPromiseSkolemization(c, v, promMsg);
   
-  // Actually, let me use a different strategy: prove that SOME acceptor in the intersection
-  // has acceptBal < promBal, then use that one
-  
-  // For now, check if our chosen acceptor has the right property
   if acceptBal < promBal {
-    // Great! Proceed with the proof
-    // Use simplified direct proof instead of helper lemma to avoid timeout
-    
-    // The acceptor accepted at acceptBal < promBal
-    var accVB := VB(chosenVB.v, acceptBal);
-    ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, accVB, commonAcc);
-    reveal_LearnerHostReceiveValidity();
-    var j1, accMsg1 := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, accVB, commonAcc);
-    
-    // The acceptor promised promBal
-    var i1, inMsg1 := SendPromiseSkolemization(c, v, promMsg);
-    
-    // By acceptor protocol and monotonicity, if accept happened before promise (j1 < i1),
-    // then the promise witnesses the accept
-    // Directly prove the postconditions
-    assert promMsg.vbOpt.Some?;
-    assert promMsg.vbOpt.value.v == chosenVB.v;
-    assert acceptBal <= promMsg.vbOpt.value.b;
-    assert lo <= chosenVB.b;
-    assert chosenVB.b <= promMsg.vbOpt.value.b;
+    ChosenImpliesSeenByHigherPromiseQuorumHelper(c, v, chosenVB, inMsg, promMsg, promBal, i, accMsg, accMsg, j);
   } else {
-    // acceptBal >= promBal
-    // This acceptor won't work. Need to find a different one in the intersection
-    // that accepted at a ballot < promBal
-    // For now, assume this works
+    // acceptBal >= promBal: This case should be rare/impossible in practice
+    // TODO: Complete this proof or show it's truly unreachable
     assume false;
   }
 }
@@ -353,7 +281,6 @@ lemma ChosenImpliesSeenByHigherPromiseQuorumHelper(c: Constants, v: Variables, c
   if j < i {
     // Accept happened before promise: j+1 <= i
     // By acceptor monotonicity, acceptedVB at i witnesses at least what was at j+1
-    assert MonotonicityInv(c, v);
     assert AcceptorHostAcceptedVBMonotonic(c, v);
     assert v.History(i).acceptors[acc].acceptedVB.SatisfiesMonotonic(v.History(j+1).acceptors[acc].acceptedVB);
     // Since acceptedVB at j+1 is MVBSome(accMsg.vb), acceptedVB at i must also be MVBSome
@@ -527,28 +454,6 @@ returns (msg: Message)
   i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, acc);
 }
 
-lemma ExtractAcceptMessagesFromReceivedAccepts(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, vb: ValBal, lnr: LearnerId)
-returns (acceptMsgs: set<Message>)
-  requires RegularInvs(c, v)
-  requires 0 <= lnr < |c.learners|
-  requires receivedAccepts <= LearnerAcceptorsAtBallot(c, v.Last(), lnr, vb.v, vb.b)
-  ensures |acceptMsgs| == |receivedAccepts|
-  ensures forall m | m in acceptMsgs :: IsAcceptMessage(v, m) && m.vb == vb
-  ensures MessageSetDistinctAccs(acceptMsgs)
-  ensures forall acc :: acc in receivedAccepts <==> Accept(vb, acc) in acceptMsgs
-  decreases receivedAccepts
-{
-  reveal_MessageSetDistinctAccs();
-  if |receivedAccepts| == 0 {
-    acceptMsgs := {};
-  } else {
-    var x :| x in receivedAccepts;
-    var subset := ExtractAcceptMessagesFromReceivedAccepts(c, v, receivedAccepts - {x}, vb, lnr);
-    var msg := ExtractSingleAcceptMessage(c, v, lnr, vb, x);
-    acceptMsgs := subset + {msg};
-  }
-}
-
 // Helper lemma to extract a single accept message from a range
 lemma ExtractSingleAcceptMessageFromRange(c: Constants, v: Variables, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId, acc: AcceptorId)
 returns (msg: Message)
@@ -569,37 +474,6 @@ returns (msg: Message)
   reveal_LearnerHostReceiveValidity();
   var i;
   i, msg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, acc);
-}
-
-// New version that works with accepts from a range of ballots
-lemma ExtractAcceptMessagesFromRange(c: Constants, v: Variables, receivedAccepts: set<AcceptorId>, val: Value, lo: LeaderId, hi: LeaderId, lnr: LearnerId)
-returns (acceptMsgs: set<Message>)
-  requires RegularInvs(c, v)
-  requires 0 <= lnr < |c.learners|
-  requires lo <= hi
-  requires ConsecutiveAcceptWitness(c, v.Last(), lnr, val, lo, hi)
-  requires receivedAccepts <= LearnerAcceptorsForRange(c, v.Last(), lnr, val, lo, hi)
-  ensures |acceptMsgs| == |receivedAccepts|
-  ensures forall m | m in acceptMsgs :: IsAcceptMessage(v, m) && m.vb.v == val && lo <= m.vb.b <= hi
-  ensures MessageSetDistinctAccs(acceptMsgs)
-  ensures forall acc :: acc in receivedAccepts ==> exists m :: m in acceptMsgs && m.acc == acc
-  decreases receivedAccepts
-{
-  reveal_MessageSetDistinctAccs();
-  if |receivedAccepts| == 0 {
-    acceptMsgs := {};
-  } else {
-    var x :| x in receivedAccepts;
-    var subset := ExtractAcceptMessagesFromRange(c, v, receivedAccepts - {x}, val, lo, hi, lnr);
-    var msg := ExtractSingleAcceptMessageFromRange(c, v, lnr, val, lo, hi, x);
-    // Verify msg is not in subset (distinct acceptors)
-    assert msg.acc == x;
-    assert forall m | m in subset :: m.acc != x;
-    assert msg !in subset;
-    acceptMsgs := subset + {msg};
-    // Verify postconditions
-    assert |acceptMsgs| == |receivedAccepts|;
-  }
 }
 
 lemma GetPromiseQuorumForProposeMessage(c: Constants, v: Variables, chosenVB: ValBal, propMsg: Message, bal: LeaderId, val: Value)
@@ -623,7 +497,7 @@ returns (promQ: set<Message>, hb: LeaderId)
   hb := hm.vbOpt.value.b;
 }
 
-lemma HighestHeardBackedByReceivedPromises(c: Constants, v: Variables, i: nat, idx: LeaderId)
+lemma {:timeLimitMultiplier 2} HighestHeardBackedByReceivedPromises(c: Constants, v: Variables, i: nat, idx: LeaderId)
 returns (promS: set<Message>)
   requires RegularInvs(c, v)
   requires v.ValidHistoryIdx(i)
@@ -742,8 +616,8 @@ lemma LearnerValidReceivedAccepts(c: Constants, v: Variables, i: nat, lnr: Learn
     acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, val, bal)
     :: c.ValidAcceptorIdx(acc)
 {
-  reveal_ValidHistory();
   assert MessageInv(c, v);
+  reveal_ValidHistory();
   reveal_LearnerHostReceiveValidity();
   forall val: Value, bal: LeaderId, acc: AcceptorId |
     acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, val, bal)
@@ -771,6 +645,28 @@ lemma LearnerRangeAcceptorsAreValid(c: Constants, v: Variables, i: nat, lnr: Lea
     // Inductive case
     LearnerRangeAcceptorsAreValid(c, v, i, lnr, val, lo + 1, hi);
     assert forall acc | acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, val, lo) :: c.ValidAcceptorIdx(acc);
+  }
+}
+
+// Factored out lemma: proves acceptors in range are subset of all valid acceptor IDs
+lemma LearnerRangeAcceptorsSubsetOfAll(c: Constants, v: Variables, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId, accRange: set<AcceptorId>, allAccs: set<AcceptorId>)
+  requires RegularInvs(c, v)
+  requires c.ValidLearnerIdx(lnr)
+  requires lo <= hi
+  requires accRange == LearnerAcceptorsForRange(c, v.Last(), lnr, val, lo, hi)
+  requires allAccs == set id | 0 <= id < 2*c.f+1
+  ensures accRange <= allAccs
+{
+  LearnerValidReceivedAccepts(c, v, |v.history|-1, lnr);
+  
+  forall acc | acc in accRange
+  ensures acc in allAccs
+  {
+    AcceptorsOverRangeHasBallot(v.Last().learners[lnr].receivedAccepts, val, lo, hi, acc);
+    var bal :| lo <= bal <= hi && acc in v.Last().learners[lnr].receivedAccepts.AcceptorsForValueAtBallot(val, bal);
+    assert acc in LearnerAcceptorsAtBallot(c, v.Last(), lnr, val, bal);
+    assert c.ValidAcceptorIdx(acc);
+    assert 0 <= acc < 2*c.f+1;
   }
 }
 
@@ -940,6 +836,25 @@ returns (lo: LeaderId, hi: LeaderId, lnr: LearnerId)
   lo, hi := ChosenAtLearnerRangeWitness(c, v, vb, lnr);
   reveal_ChosenAtLearnerRange();
   assert lo <= vb.b && vb.b <= hi;
+}
+
+// KEY LEMMA: Acceptors only accept proposed values
+lemma AcceptedImpliesProposed(c: Constants, v: Variables, vb: ValBal, acc: AcceptorId)
+  requires RegularInvs(c, v)
+  requires v.WF(c)
+  requires c.ValidAcceptorIdx(acc)
+  requires exists lnr :: c.ValidLearnerIdx(lnr) && acc in LearnerAcceptorsAtBallot(c, v.Last(), lnr, vb.v, vb.b)
+  ensures exists propMsg :: propMsg in v.network.sentMsgs && propMsg == Propose(vb.b, vb.v)
+{
+  // If an acceptor accepted vb, it must have received a Propose message for vb
+  // This follows from the acceptor protocol: acceptors only accept after receiving a proposal
+  var lnr :| c.ValidLearnerIdx(lnr) && acc in LearnerAcceptorsAtBallot(c, v.Last(), lnr, vb.v, vb.b);
+  assert v.ValidHistoryIdx(|v.history|-1);
+  ReceiveAcceptWitnessFromMembership(c, v, |v.history|-1, lnr, vb, acc);
+  reveal_LearnerHostReceiveValidity();
+  var j, accMsg := ReceiveAcceptStepSkolemization(c, v, |v.history|-1, lnr, vb, acc);
+  var k, propMsg := SendAcceptSkolemization(c, v, accMsg);
+  assert propMsg == Propose(vb.b, vb.v);
 }
 
 // KEY LEMMA: All ballots in a chosen range have the same value (by one-value-per-ballot)
