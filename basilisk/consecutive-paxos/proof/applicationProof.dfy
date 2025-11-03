@@ -208,7 +208,14 @@ returns (lnr: LearnerId, lo: LeaderId, hi: LeaderId, accRange: set<AcceptorId>)
 // Key optimization: wraps reveal calls in GetChosenRangeWitnesses to reduce verification context
 lemma ChosenImpliesSeenByHigherPromiseQuorum(c: Constants, v: Variables, chosenVB: ValBal, promBal: LeaderId, promQ: set<Message>)
 returns (promMsg: Message) 
-  requires RegularInvs(c, v)
+  requires v.WF(c)
+  requires ValidVariables(c, v)
+  requires ValidMessages(c, v)
+  requires SendPromiseValidity(c, v)
+  requires SendAcceptValidity(c, v)
+  requires LearnerHostReceiveValidity(c, v)
+  requires AcceptorHostPromisedMonotonic(c, v)
+  requires AcceptorHostAcceptedVBMonotonic(c, v)
   requires Chosen(c, v.Last(), chosenVB)
   requires IsPromiseQuorum(c, v, promQ, promBal)
   requires chosenVB.b < promBal
@@ -251,7 +258,13 @@ returns (promMsg: Message)
 
 // Fixed helper: proves promise witnesses the ACCEPT ballot (which is in the chosen range)
 lemma ChosenImpliesSeenByHigherPromiseQuorumHelper(c: Constants, v: Variables, chosenVB: ValBal, inMsg: Message, promMsg: Message, promBal: LeaderId, i: nat, propMsg: Message, accMsg: Message, j: nat) 
-  requires RegularInvs(c, v)
+  requires v.WF(c)
+  requires ValidVariables(c, v)
+  requires ValidMessages(c, v)
+  requires SendPromiseValidity(c, v)
+  requires SendAcceptValidity(c, v)
+  requires AcceptorHostPromisedMonotonic(c, v)
+  requires AcceptorHostAcceptedVBMonotonic(c, v)
   requires IsPromiseMessage(v, promMsg)
   requires IsAcceptMessage(v, accMsg)
   requires IsProposeMessage(v, propMsg)
@@ -609,14 +622,16 @@ returns (proposeMsg: Message)
 }
 
 lemma LearnerValidReceivedAccepts(c: Constants, v: Variables, i: nat, lnr: LearnerId) 
-  requires RegularInvs(c, v)
+  requires v.WF(c)
+  requires ValidVariables(c, v)
+  requires ValidMessages(c, v)
+  requires LearnerHostReceiveValidity(c, v)
   requires v.ValidHistoryIdx(i)
   requires c.ValidLearnerIdx(lnr)
   ensures forall val: Value, bal: LeaderId, acc: AcceptorId |
     acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, val, bal)
     :: c.ValidAcceptorIdx(acc)
 {
-  assert MessageInv(c, v);
   reveal_ValidHistory();
   reveal_LearnerHostReceiveValidity();
   forall val: Value, bal: LeaderId, acc: AcceptorId |
@@ -630,7 +645,10 @@ lemma LearnerValidReceivedAccepts(c: Constants, v: Variables, i: nat, lnr: Learn
 }
 
 lemma LearnerRangeAcceptorsAreValid(c: Constants, v: Variables, i: nat, lnr: LearnerId, val: Value, lo: LeaderId, hi: LeaderId)
-  requires RegularInvs(c, v)
+  requires v.WF(c)
+  requires ValidVariables(c, v)
+  requires ValidMessages(c, v)
+  requires LearnerHostReceiveValidity(c, v)
   requires v.ValidHistoryIdx(i)
   requires c.ValidLearnerIdx(lnr)
   requires lo <= hi
@@ -889,7 +907,8 @@ lemma BallotInChosenRangeHasChosenValue(c: Constants, v: Variables, chosenVB: Va
 }
 
 lemma LearnerInitialAcceptorsEmpty(c: Constants, v: Variables, lnr: LearnerId, val: Value, bal: LeaderId)
-  requires RegularInvs(c, v)
+  requires v.WF(c)
+  requires ValidVariables(c, v)
   requires c.ValidLearnerIdx(lnr)
   ensures LearnerAcceptorsAtBallot(c, v.History(0), lnr, val, bal) == {}
 {
@@ -901,7 +920,8 @@ lemma LearnerInitialAcceptorsEmpty(c: Constants, v: Variables, lnr: LearnerId, v
 }
 
 lemma ReceiveAcceptWitnessFromMembership(c: Constants, v: Variables, i: nat, lnr: LearnerId, vb: ValBal, acc: AcceptorId)
-  requires RegularInvs(c, v)
+  requires v.WF(c)
+  requires ValidVariables(c, v)
   requires v.ValidHistoryIdx(i)
   requires c.ValidLearnerIdx(lnr)
   requires acc in LearnerAcceptorsAtBallot(c, v.History(i), lnr, vb.v, vb.b)
