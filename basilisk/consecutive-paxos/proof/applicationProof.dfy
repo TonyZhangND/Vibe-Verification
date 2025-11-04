@@ -236,7 +236,8 @@ returns (promMsg: Message)
   var i, inMsg := SendPromiseSkolemization(c, v, promMsg);
   var j, propMsg := SendAcceptSkolemization(c, v, accMsg);
   
-  // TONY: I think this lemma is true, but the proof needs to be restructured from first principles
+  // TONY: This is actually unprovable. I think we need to restructure the proof such that
+  // `chosenVB` is always the highest element in the chosen range.
   // Helper proves the temporal reasoning
   assume accMsg.vb == chosenVB;
   assume accMsg.vb.b < promBal;
