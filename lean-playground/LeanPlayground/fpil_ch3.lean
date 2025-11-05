@@ -157,26 +157,22 @@ instance : ToString Pos2 where
 #eval s!"Eight is {eight}"
 
 
--- Even numbers: 0, 2, 4, 6, ...
--- succ adds 2 (not 1)
-inductive Evens : Type where
-  | zero : Evens
-  | succ : Evens -> Evens
+-- Even numbers: represented as double of a Nat
+-- Evens.double n represents 2 * n
+structure Evens where
+  double ::
+  half : Nat
 
--- Convert to Nat (each succ adds 2)
-def Evens.toNat : Evens → Nat
-  | Evens.zero => 0
-  | Evens.succ n => n.toNat + 2
+-- Convert to Nat (just double the half)
+def Evens.toNat (e : Evens) : Nat := e.half * 2
 
 -- Addition for even numbers
-def Evens.plus : Evens → Evens → Evens
-  | Evens.zero, k => k
-  | Evens.succ n, k => Evens.succ (n.plus k)
+def Evens.plus (a b : Evens) : Evens :=
+  Evens.double (a.half + b.half)
 
 -- Multiplication for even numbers
-def Evens.mul : Evens → Evens → Evens
-  | Evens.zero, _ => Evens.zero
-  | Evens.succ n, k => k.plus (k.plus (n.mul k))
+def Evens.mul (a b : Evens) : Evens :=
+  Evens.double (a.half * b.half * 2)
 
 -- Type class instances
 instance : ToString Evens where
@@ -188,11 +184,51 @@ instance : Add Evens where
 instance : Mul Evens where
   mul := Evens.mul
 
+-- OfNat for Evens: pattern (n + n) matches even numbers
+instance : OfNat Evens (2 * n) where
+  ofNat := Evens.double n
+
+-- Zero instance
+instance : Zero Evens where
+  zero := Evens.double 0
+
 -- Examples
-def two : Evens := Evens.succ Evens.zero
-def four : Evens := Evens.succ two
-def six : Evens := Evens.succ four
+def two : Evens := Evens.double 1   -- 2 * 1 = 2
+def four : Evens := Evens.double 2  -- 2 * 2 = 4
+def six : Evens := Evens.double 3   -- 2 * 3 = 6
 
 #eval two + four  -- should be 6
 #eval two * four  -- should be 8
 #eval s!"Two times four is {two * four}"
+
+-- Testing numeric literals for Evens
+#eval (0 : Evens)   -- 0 = 0 + 0, works via Zero instance!
+-- #eval (2 : Evens)   -- 0 = 0 + 0, works via Zero instance!
+
+-- Unfortunately, the (n + n) pattern STILL doesn't trigger during type class resolution
+-- Even with the structure approach, Lean doesn't perform arithmetic simplification
+-- when searching for OfNat instances
+-- #eval (6 : Evens)   -- doesn't work - Lean doesn't simplify 6 to (2 * 3)
+-- #eval (10 : Evens)  -- doesn't work - Lean doesn't simplify 10 to (2 * 5)
+
+#eval Evens.double 21
+#eval Evens.double 50
+#eval two + Evens.double 5
+
+
+/- Ch 3.2 -/
+
+
+#check @IO.println
+
+-- α must have `Add` and `Zero` instances defined, as indicated by the square brackets
+def List.sumOfContents [Add α] [Zero α] : List α → α
+  | [] => 0
+  | x :: xs => x + xs.sumOfContents
+
+structure PPoint (α : Type) where
+  x : α
+  y : α
+
+instance [Add α] : Add (PPoint α) where
+  add p1 p2 := { x := p1.x + p2.x, y := p1.y + p2.y }
